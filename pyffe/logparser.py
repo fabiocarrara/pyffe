@@ -28,6 +28,7 @@ class LogParser (object):
 		return time_seconds - self.t_zero
 		
 	def parse(self, callback=None):
+		test_num = 0
 		for line in self.line_iter:
 			# NEW TEST ITERATION
 			matches = self.test_it.match(line)
@@ -38,16 +39,14 @@ class LogParser (object):
 				minute = int( matches.group(4) )
 				second = int( matches.group(5) )
 				millis = int( matches.group(6) )
+				it = int( matches.group(7) )
+				test_num = int( matches.group(8) )
 				
 				time = self.get_relative_time(month, day, hour, minute, second, millis)
 				
-				it = int( matches.group(7) )
-								
-				# TODO implement for multiple test sets
-				test_num = int( matches.group(8) )
-				
-				self.data['test']['time'].append(time)
-				self.data['test']['iteration'].append(it)
+				if test_num is 0:
+					self.data['test']['time'].append(time)
+					self.data['test']['iteration'].append(it)
 			
 			# TEST OUTPUTS
 			matches = self.test_out.match(line)
@@ -56,10 +55,13 @@ class LogParser (object):
 				out_name = str( matches.group(2) )
 				out_value = float( matches.group(3) )
 				
-				if out_name not in self.data['test']['out']:
-					self.data['test']['out'][out_name] = []
+				if test_num not in self.data['test']['out']:
+					self.data['test']['out'][test_num] = dict()
+				
+				if out_name not in self.data['test']['out'][test_num]:
+					self.data['test']['out'][test_num][out_name] = []
 					
-				self.data['test']['out'][out_name].append(out_value)
+				self.data['test']['out'][test_num][out_name].append(out_value)
 				
 			# NEW TRAIN ITERATION
 			matches = self.train_it.match(line)

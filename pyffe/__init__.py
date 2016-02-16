@@ -1,5 +1,5 @@
 from .input_format import InputFormat
-from .modelgen import ModelGen
+from .model import Model
 from .experiment import Experiment
 from .solver import Solver
 from .dataset import Dataset

@@ -4,8 +4,7 @@ import math
 class Solver (object):
 
 	def __init__(self, **kwargs):
-		self.init_solver_parameter()
-		self.params = dict(
+		self.__dict__['params'] = dict(
 			train_epochs = 3,
 			val_interval_epochs = 1,
 			val_epochs = 1,
@@ -16,15 +15,30 @@ class Solver (object):
 		)
 		self.params.update(kwargs)
 		
+		self.init_solver_parameter()
+		
 		# pass args to SolverParameter
 		for k,v in self.params.iteritems():
 			if hasattr(self.sp, k):
 				setattr(self.sp, k, v)
 	
+	def __getattr__(self, name):
+		if name in self.__dict__:
+			return self.__dict__[name]
+		elif name in self.params:
+			return self.params[name]
+		
+		raise AttributeError("No attribute called {} is present".format(name))
+	
+	def __setattr__(self, name, value):
+		if name in self.params:
+			self.params[name] = value
+	
 	def init_solver_parameter(self):
-		self.sp = caffe.proto.caffe_pb2.SolverParameter()
-		self.sp.net = "train_val.prototxt"
-		#self.sp.solver_type = "SGD"
+		self.__dict__['sp'] = caffe.proto.caffe_pb2.SolverParameter()
+
+		self.sp.solver_type = 0 # SGD
+		self.sp.solver_mode = 1 # GPU
 		
 		# critical:
 		self.sp.base_lr = 0.01
@@ -54,15 +68,9 @@ class Solver (object):
 		# self.sp.average_loss = 25 # this has to do with the display.
 		# self.sp.iter_size = 1 # this is for accumulating gradients
 		self.sp.random_seed = 23
-		'''
-		if (debug):
-			self.sp.max_iter = 12
-			self.sp.test_iter = 1
-			self.sp.test_interval = 4
-			self.sp.display = 1
-		'''
 		
-	def set_train_epoch(self, num, batch_size):
+	def set_train(self, proto_path, num, batch_size):
+		self.sp.train_net =  proto_path
 		self.sp.max_iter = int( math.ceil( float(self.params['train_epochs']) * num / batch_size ) )
 		self.sp.display = int ( max( round( num / (batch_size * float(self.params['display_per_epoch']) ) ), 1 ) )
 		self.sp.average_loss = self.sp.display # display averaged loss
@@ -72,11 +80,9 @@ class Solver (object):
 		if self.sp.lr_policy == "step":
 			self.sp.stepsize = int( math.ceil( float(self.params['stepsize_epochs']) * num / batch_size ) )
 		
-	def set_val_epoch(self, num, batch_size):
+	def add_val(self, proto_path, num, batch_size):
+		self.sp.test_net.append( proto_path )
 		self.sp.test_iter.append( int( math.ceil( float(self.params['val_epochs']) * num / batch_size ) ) )
-
-	def disable_val(self):
-		self.sp.test_initialization = False
 
 	def to_solver_prototxt(self):
 		return str(self.sp)
