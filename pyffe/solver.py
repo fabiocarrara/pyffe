@@ -1,5 +1,7 @@
-import caffe
+import copy
 import math
+import caffe
+from google.protobuf.text_format import Merge
 
 class Solver (object):
 
@@ -21,6 +23,21 @@ class Solver (object):
 		for k,v in self.params.iteritems():
 			if hasattr(self.sp, k):
 				setattr(self.sp, k, v)
+				
+	def __getstate__(self):
+		state = copy.copy(self.__dict__)
+		# Binary serialization is more space-efficient, but introduces
+		# approximation errors on floats, sticking with string representation
+		# state['sp'] = self.__dict__['sp'].SerializeToString()
+		state['sp'] = str(self.__dict__['sp'])
+		return state
+	
+	def __setstate__(self, state):
+		object.__setattr__(self, '__dict__', state)
+		tmp = self.__dict__['sp']
+		self.__dict__['sp'] = caffe.proto.caffe_pb2.SolverParameter()
+		# self.__dict__['sp'].ParseFromString(tmp)
+		Merge(tmp, self.__dict__['sp'])
 	
 	def __getattr__(self, name):
 		if name in self.__dict__:
@@ -31,8 +48,11 @@ class Solver (object):
 		raise AttributeError("No attribute called {} is present".format(name))
 	
 	def __setattr__(self, name, value):
-		if name in self.params:
-			self.params[name] = value
+		if name in self.__dict__['params']:
+			self.__dict__['params'][name] = value
+		
+		if 'sp' in self.__dict__ and hasattr(self.__dict__['sp'], name):
+				setattr(self.__dict__['sp'], name, value)
 	
 	def init_solver_parameter(self):
 		self.__dict__['sp'] = caffe.proto.caffe_pb2.SolverParameter()

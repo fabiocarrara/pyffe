@@ -12,8 +12,10 @@ class DataSubset(object):
 		self.get_count()
 
 	def __getattr__(self, name):
-		if hasattr(self.parent, name):
-			return self.parent.__dict__[name]
+		if hasattr(self.__dict__, name):
+			return self.__dict__[name]
+		elif 'parent' in self.__dict__ and hasattr(self.__dict__['parent'], name):
+			return self.__dict__['parent'].__dict__[name]
 
 		raise AttributeError("No attribute called {} is present".format(name))
 
@@ -42,20 +44,23 @@ class Dataset (object):
 	def __init__(self, dataset_path):
 		self.path = os.path.abspath(dataset_path)
 		self.name = os.path.basename(self.path.rstrip("/"))
+		self.root_folder = None
 
 		config_file = self.path + "/config.py"
 		if os.path.exists(config_file):
-			execfile(config_file, self.__dict__)
-
+			context = dict()
+			execfile(config_file, context)
+			self.__dict__.update(context['config'])
+		
 		self.subsets = {
 			os.path.splitext(list_file)[0]: DataSubset(self, list_file)
 			for list_file in os.listdir(self.path) if list_file.endswith(".txt")
 		}
 
 	def __getattr__(self, name):
-		if hasattr(self, name):
+		if hasattr(self.__dict__, name):
 			return self.__dict__[name]
-		elif name in self.subsets:
-			return self.subsets[name]
+		elif 'subsets' in self.__dict__ and name in self.__dict__['subsets']:
+			return self.__dict__['subsets'][name]
 
 		raise AttributeError("No attribute called {} is present".format(name))

@@ -15,7 +15,8 @@ class Model (object):
 			batch_sizes=[64, 64], # respectively train and val batch sizes
 			channels=3,
 			pretrain=None,
-			optimal_batch_size=None
+			optimal_batch_size=None,
+			crop_on_test=True,
 		)
 		
 		if 'batch_sizes' in kwargs and type(kwargs['batch_sizes']) is not list:
@@ -26,8 +27,8 @@ class Model (object):
 	def __getattr__(self, name):
 		if name in self.__dict__:
 			return self.__dict__[name]
-		if name in self.params:
-			return self.params[name]
+		if 'params' in self.__dict__ and name in self.__dict__['params']:
+			return self.__dict__['params'][name]
 		
 		raise AttributeError("No attribute called {} is present".format(name))
 	
@@ -44,6 +45,9 @@ class Model (object):
 		return self.batch_sizes[1]
 		
 	def optimize_batch_size(self):
+		# override!
+		self.optimal_batch_size = 1000
+	
 		if self.optimal_batch_size is not None:
 			self.batch_size = self.optimal_batch_size
 			return self.optimal_batch_size
@@ -97,10 +101,12 @@ class Model (object):
 			batch_size = self.batch_sizes[0],
 			new_width = self.infmt.new_width,
 			new_height = self.infmt.new_height,
-			root_folder = subset.root_folder,
 			rand_skip = self.batch_size,
 			shuffle = True
 		)
+		
+		if subset.root_folder is not None:		
+			image_data_param['root_folder'] = subset.root_folder
 		
 		transform_param = dict(
 			mirror = self.infmt.mirror,
@@ -113,7 +119,7 @@ class Model (object):
 		
 		if self.infmt.mean_file is not None:
 			transform_param['mean_file'] = self.infmt.mean_file
-		else:
+		elif self.infmt.mean_pixel is not None:
 			transform_param['mean_value'] = self.infmt.mean_pixel
 		
 		n.data, n.label = L.ImageData(ntop=2, image_data_param=image_data_param, transform_param=transform_param) #, include=dict(phase=caffe.TRAIN))
@@ -123,27 +129,39 @@ class Model (object):
 		return net
 		
 	def val_head(self, subset):
+	
 		image_data_param = dict(
 			source = subset.list_absolute_path,
 			batch_size = self.batch_sizes[1],
-			new_width = self.infmt.new_width,
-			new_height = self.infmt.new_height,
 			root_folder = subset.root_folder,
 			rand_skip = self.batch_sizes[1],
-			shuffle = True
+			shuffle = True,
+			# new_width,
+			# new_height
 		)
 		
 		transform_param = dict(
 			mirror = False,
-			crop_size = self.infmt.crop_size,
+			# crop_size = self.infmt.crop_size,
+			# mean_value = self.infmt.mean_pixel,
+			# mean_file,
+			# scale,
 		)
 		
+		if self.crop_on_test:
+			image_data_param['new_width'] = self.infmt.new_width
+			image_data_param['new_height'] = self.infmt.new_height
+			transform_param['crop_size'] = self.infmt.crop_size
+		else:
+			image_data_param['new_width'] = self.infmt.crop_size
+			image_data_param['new_height'] = self.infmt.crop_size
+	
 		if self.infmt.scale is not None:
 			transform_param['scale'] = self.infmt.scale
 		
 		if self.infmt.mean_file is not None:
 			transform_param['mean_file'] = self.infmt.mean_file
-		else:
+		elif self.infmt.mean_pixel is not None:
 			transform_param['mean_value'] = self.infmt.mean_pixel
 		
 		n = NetSpec()
@@ -170,22 +188,33 @@ class Model (object):
 		image_data_param = dict(
 			source = subset.list_absolute_path,
 			batch_size = self.batch_size,
-			new_width = self.infmt.new_width,
-			new_height = self.infmt.new_height,
 			root_folder = subset.root_folder
+			# new_width,
+			# new_height
 		)
 		
 		transform_param = dict(
-			crop_size = self.infmt.crop_size,
+			# crop_size = self.infmt.crop_size,
 			# mean_value = self.infmt.mean_pixel,
+			# mean_file,
+			# scale
 		)
+		
+		if self.crop_on_test:
+			image_data_param['new_width'] = self.infmt.new_width
+			image_data_param['new_height'] = self.infmt.new_height
+			transform_param['crop_size'] = self.infmt.crop_size
+		else:
+			image_data_param['new_width'] = self.infmt.crop_size
+			image_data_param['new_height'] = self.infmt.crop_size
+			
 		
 		if self.infmt.params['scale'] is not None:		
 			transform_param['scale'] = self.infmt.scale
 		
 		if self.infmt.mean_file is not None:
 			transform_param['mean_file'] = self.infmt.mean_file
-		else:
+		elif self.infmt.mean_pixel is not None:
 			transform_param['mean_value'] = self.infmt.mean_pixel
 		
 		n.data, n.label = L.ImageData(ntop=2, image_data_param=image_data_param, transform_param=transform_param) #, include=dict(phase=caffe.TEST))
@@ -234,9 +263,16 @@ class Model (object):
 		self.optimize_batch_size()
 		
 		num = subset.get_count()
-		c = self.batch_size
-		while num % c > 1:
-			c = c - 1
+		c = min(1000, self.batch_size)
+		
+		r = 0
+		while True:
+			while num % c > r:
+				c = c - 1
+			if c != 1:
+				break
+			r = r + 1
+	
 		self.batch_size = c
 		iters = num / c
 		

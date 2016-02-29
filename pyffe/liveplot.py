@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
+import warnings
 import numpy as np
 from cycler import cycler
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+
+# FIXME limit only the warning to suppress, not all the module
+warnings.simplefilter("ignore", UserWarning)
 
 class LivePlot():
 
@@ -16,7 +20,6 @@ class LivePlot():
 		gs = gridspec.GridSpec(2,1, height_ratios=[3,1])
 		self.figure = plt.figure()
 		self.axup = plt.subplot(gs[0])
-		self.axup2 = self.axup.twinx()
 		self.axdown = plt.subplot(gs[1])
 		
 		plt.tight_layout()
@@ -33,6 +36,7 @@ class LivePlot():
 		self.axdown.set_autoscalex_on(True)
 		self.axdown.set_autoscaley_on(True)
 		
+		self.axup2 = self.axup.twinx()
 		self.axup2.set_autoscalex_on(True)
 		self.axup2.set_autoscaley_on(False)
 		self.axup2.set_ylim(ymin=0, ymax=1)
@@ -42,7 +46,7 @@ class LivePlot():
 		
 		# Other stuff
 		self.axup2.grid(which='major')
-		self.axup2.grid(which='minor', alpha=0.2)
+		self.axup2.grid(which='minor', alpha=0.7)
 
 	def update_data(self, prefix, label, axis, xdata, ydata):
 		name = prefix + '_' + label
@@ -98,22 +102,27 @@ class LivePlot():
 					ax = self.axup if label == 'loss' else self.axup2
 					self.update_data('test', label+"#"+str(test_num), ax, its[:num_dat], dat)
 		
-		# self.ax1.legend(self.lines, [l.get_label() for k,l in self.lines.iteritems()], loc=0)
-		self.axup.legend(loc='center right', fancybox=True)
-		self.axup2.legend(loc='upper left', fancybox=True)
-		self.axdown.legend(loc='upper right', fancybox=True)
+		h1, l1 = self.axup.get_legend_handles_labels()
+		h2, l2 = self.axup2.get_legend_handles_labels()
+		self.axup2.legend(h1+h2, l1+l2, loc='center right', fancybox=True, shadow=True)
+		self.axdown.legend(loc='upper right', fancybox=True, shadow=True)
 	
 if __name__ == "__main__":
 	import os
 	import sys
+	# print sys.path
 	import pyffe
+	# sys.stdin.read()
+	
 	if len(sys.argv) < 2:
 		print "Usage: {} log.caffelog".format(os.path.basename(sys.argv[0]))
 		sys.exit(1)
-		
+
 	with open(sys.argv[1], "r") as f:
 		lp = LivePlot()
 		line_iter = iter( f.readline, '' )
 		data = pyffe.LogParser(line_iter).parse()
 		lp(data)
 		lp.waitclose()
+	
+

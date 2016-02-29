@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import copy
 import glob
 import pyffe
 import pickle
@@ -16,15 +17,24 @@ logging.basicConfig(format='%(levelname)s %(asctime)s: %(message)s', datefmt='%Y
 def mkdir_p(path):
 	if not os.path.exists(path):
 		os.makedirs(path)
+		
+def load(path):
+	# path can be the path to the folder or to the .pyffe file
+	if os.path.isfile(path):
+		return pickle.load(open(path, "rb"))
+	if os.path.isdir(path):
+		return pickle.load(open(path.rstrip("/") + "/" + Experiment.EXP_FILE, "rb"))
+
 
 class Experiment (object):
 
 	SNAPSHOTS_DIR	= "snapshots"
 	LOG_FILE 		= "log.caffelog"
+	EXP_FILE		= "exp.pyffe"
 
 	def __init__(self, pyffe_model, pyffe_solver, train, test=[], val=[]):
-		self.model = pyffe_model
-		self.solver = pyffe_solver
+		self.model = copy.deepcopy(pyffe_model)
+		self.solver = copy.deepcopy(pyffe_solver)
 		
 		self.train = train
 		self.test = test if type(test) is list else [test]
@@ -36,6 +46,14 @@ class Experiment (object):
 			name = name + "-vl_" + "_".join([v.get_name() for v in self.val])
 		if self.test is not None:
 			name = name + "-ts_" + "_".join([t.get_name() for t in self.test])
+		
+		if len(name) > 150: # name too long
+			name = self.model.name + "-tr_" + self.train.get_name()
+			if self.val is not None:
+				name = name + "-vl_" + self.val[0].get_name() + "_etcEtc_" + self.val[-1].get_name()
+			if self.test is not None:
+				name = name + "-ts_" + self.test[0].get_name() + "_etcEtc_" + self.test[-1].get_name()
+				
 		return name
 	
 	def long_name(self):
@@ -45,6 +63,9 @@ class Experiment (object):
 		if self.test is not None:
 			name = name + ", tested on " + "_".join([t.get_name() for t in self.test])
 		return name
+		
+	def clean(self):
+		raise NotImplementedError()
 		
 	def setup(self, exps_parent_dir):
 		logging.info("Setting up " + self.long_name() + " ...")
@@ -92,20 +113,22 @@ class Experiment (object):
 		os.system("/opt/caffe/python/draw_net.py --rankdir TB " + self.workdir + "/train.prototxt " + self.workdir + "/net.png > /dev/null")
 		
 		# DUMP EXPERIMENT OBJ
-		# FIXME does not work...
-		#with open(self.workdir + "/exp.pyffe", "w") as f:
-		#	pickle.dump(self, f)
+		with open(self.workdir + "/" + self.EXP_FILE, "w") as f:
+			pickle.dump(self, f)
 	
-	def run(self):
+	def run(self, live_plot=True):
 		logging.info("Training on " + self.train.get_name() + " while validating on " + ", ".join([ str(v) for v in self.val ]) + " ...")
 		os.chdir(self.workdir)
 		
 		cmd = ["caffe", "train", "-gpu", "0", "-solver", "solver.prototxt"]		
 		if self.model.infmt.pretrain is not None:
 			cmd = cmd + ["-weights", os.path.basename(self.model.infmt.pretrain)]
-			
+				
 		caffe = subprocess.Popen(cmd, stderr=subprocess.PIPE)
-		tee = subprocess.Popen(["tee", "-a", self.LOG_FILE], stdin=caffe.stderr, stdout=subprocess.PIPE)
+		
+		dst = subprocess.PIPE if live_plot else open(os.devnull, 'wb')
+		
+		tee = subprocess.Popen(["tee", "-a", self.LOG_FILE], stdin=caffe.stderr, stdout=dst)
 		
 		def handler(signal, frame):
 			# propagate SIGINT down, and wait
@@ -114,9 +137,12 @@ class Experiment (object):
 		
 		signal.signal(signal.SIGINT, handler)
 		
-		line_iter = iter( tee.stdout.readline, '' )
-		liveplot = pyffe.LivePlot(title=self.long_name())
-		pyffe.LogParser(line_iter).parse(liveplot)
+		if live_plot:
+			line_iter = iter( tee.stdout.readline, '' )
+			liveplot = pyffe.LivePlot(title=self.long_name())
+			pyffe.LogParser(line_iter).parse(liveplot)
+			
+		tee.wait()
 		
 	def run_test(self):
 		os.chdir(self.workdir)
@@ -139,4 +165,18 @@ class Experiment (object):
 			# TODO python data layer with async blob preparation
 			os.system("caffe test -gpu 0 -model {} -weights snapshots/snapshot_iter_{}.caffemodel -iterations {} 2> test-{}.caffelog".format(test_file, maxiter, iters, t.get_name()))
 
-
+	def show_logs(self):
+		line_iter = iter( open(self.workdir + "/" + self.LOG_FILE).readline, '' )
+		data = pyffe.LogParser(line_iter).parse()
+		plot = pyffe.LivePlot(title=self.long_name())
+		plot(data)
+	
+	def print_test_results(self):
+		print
+		print self.long_name()
+		print '==============='
+		
+		for t in self.test:
+			print t.get_name(), ':'
+			test_file = self.workdir + "/test-" + t.get_name() + ".caffelog"
+			os.system('grep "accuracy =" {} | grep -v Batch'.format(test_file))
