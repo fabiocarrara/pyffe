@@ -5,6 +5,16 @@ from caffe import layers as L, NetSpec
 from caffe.proto.caffe_pb2 import NetParameter
 import argparse
 
+def get_batch_iter(num, c):
+	r = 0
+	while True:
+		while num % c > r:
+			c = c - 1
+		if c != 1:
+			break
+		r = r + 1
+	return c, num/c
+
 class Model (object):
 
 	def __init__(self, input_format, **kwargs):
@@ -42,7 +52,7 @@ class Model (object):
 		return self.batch_sizes[0]
 		
 	def get_val_batch_size(self):
-		return self.batch_sizes[1]
+		return self.batch_sizes[1]		
 		
 	def optimize_batch_size(self):
 		# override!
@@ -128,6 +138,12 @@ class Model (object):
 		net.name = self.name
 		return net
 		
+
+	def train_tail(self, last_top):
+		n = NetSpec()
+		n.loss = L.SoftmaxWithLoss(bottom=[last_top, "label"])
+		return n.to_proto()
+		
 	def val_head(self, subset):
 	
 		image_data_param = dict(
@@ -170,11 +186,6 @@ class Model (object):
 		net = n.to_proto()
 		net.name = self.name
 		return net
-
-	def train_tail(self, last_top):
-		n = NetSpec()
-		n.loss = L.SoftmaxWithLoss(bottom=[last_top, "label"])
-		return n.to_proto()
 		
 	def val_tail(self, last_top):
 		n = NetSpec()
@@ -228,6 +239,47 @@ class Model (object):
 		n.accuracy = L.Accuracy(bottom=[last_top, "label"], include=dict(phase=caffe.TEST))
 		return n.to_proto()
 		
+	def extract_head(self, subset):
+	
+		image_data_param = dict(
+			source = subset.list_absolute_path,
+			batch_size = self.batch_size,
+			root_folder = subset.root_folder,
+			# new_width,
+			# new_height
+		)
+		
+		transform_param = dict(
+			mirror = False,
+			# crop_size = self.infmt.crop_size,
+			# mean_value = self.infmt.mean_pixel,
+			# mean_file,
+			# scale,
+		)
+		
+		if self.crop_on_test:
+			image_data_param['new_width'] = self.infmt.new_width
+			image_data_param['new_height'] = self.infmt.new_height
+			transform_param['crop_size'] = self.infmt.crop_size
+		else:
+			image_data_param['new_width'] = self.infmt.crop_size
+			image_data_param['new_height'] = self.infmt.crop_size
+	
+		if self.infmt.scale is not None:
+			transform_param['scale'] = self.infmt.scale
+		
+		if self.infmt.mean_file is not None:
+			transform_param['mean_file'] = self.infmt.mean_file
+		elif self.infmt.mean_pixel is not None:
+			transform_param['mean_value'] = self.infmt.mean_pixel
+		
+		n = NetSpec()
+		n.data, n.label = L.ImageData(ntop=2, image_data_param=image_data_param, transform_param=transform_param) #, include=dict(phase=caffe.TEST))
+		
+		net = n.to_proto()
+		net.name = self.name
+		return net
+		
 	# abstract method: must return a NetParameter object and last top name
 	def body(self):
 		raise NotImplementedError()
@@ -265,16 +317,7 @@ class Model (object):
 		num = subset.get_count()
 		c = min(1000, self.batch_size)
 		
-		r = 0
-		while True:
-			while num % c > r:
-				c = c - 1
-			if c != 1:
-				break
-			r = r + 1
-	
-		self.batch_size = c
-		iters = num / c
+		self.batch_size , iters = get_batch_iter(num, c)
 		
 		logging.debug("Using batch size x iters = {} x {} = {} images (out of {})".format(c, iters, c*iters, num))
 		
@@ -285,4 +328,24 @@ class Model (object):
 		net.MergeFrom(tmp_net)
 		
 		return str(net), iters
+		
+	def to_extract_prototxt(self, subset):
+	
+		self.optimize_batch_size()
+		
+		num = subset.get_count()
+		c = min(1000, self.batch_size)
+		
+		c, iters = get_batch_iter(num, c)
+		logging.debug("Using batch size x iters = {} x {} = {} images (out of {})".format(c, iters, c*iters, num))
+		
+		self.batch_size = c
+		
+		net = self.extract_head(subset)
+		tmp_net, last_top = self.body()
+		net.MergeFrom(tmp_net)
+		tmp_net = self.deploy_tail(last_top)
+		net.MergeFrom(tmp_net)
+		
+		return str(net), 'score', iters
 

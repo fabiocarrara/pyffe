@@ -12,9 +12,9 @@ warnings.simplefilter("ignore", UserWarning)
 
 class LivePlot():
 
-	def __init__(self, **kwargs):
+	def __init__(self, title=None, train=None, val=None, show_iters=False):
 		plt.ion()
-		plt.rc('lines', marker='.')
+		# plt.rc('lines', marker='.')
 		
 		# Set up plot
 		gs = gridspec.GridSpec(2,1, height_ratios=[3,1])
@@ -23,7 +23,10 @@ class LivePlot():
 		self.axdown = plt.subplot(gs[1])
 		
 		plt.tight_layout()
-		if 'title' in kwargs: plt.title(kwargs['title'])
+		if title is not None: plt.title(title)
+		self.train = train
+		self.val = val
+		self.show_iters = show_iters	
 		
 		# Will contain lines
 		self.lines = dict()
@@ -31,7 +34,10 @@ class LivePlot():
 		# Autoscale on unknown axis and known lims on the other
 		self.axup.set_autoscalex_on(True)
 		self.axup.set_autoscaley_on(True)
-		self.axup.set_prop_cycle(cycler('color', ['g', 'b', 'r', 'c']))
+		self.axup.set_prop_cycle(
+			cycler('color', ['g','b','r','c']*2) +
+			cycler('marker', ['.']*4 + ['<']*4)
+		)
 		
 		self.axdown.set_autoscalex_on(True)
 		self.axdown.set_autoscaley_on(True)
@@ -42,7 +48,10 @@ class LivePlot():
 		self.axup2.set_ylim(ymin=0, ymax=1)
 		self.axup2.set_yticks(np.arange(0,11) / 10.0)
 		self.axup2.set_yticks(np.arange(0,21) / 20.0, minor=True)
-		self.axup2.set_prop_cycle(cycler('color', ['darkorange', 'm', 'k', 'y']))
+		self.axup2.set_prop_cycle(
+			cycler('color', ['darkorange','m','k','y']*2) +
+			cycler('marker', ['.']*4 + ['<']*4)
+		)
 		
 		# Other stuff
 		self.axup2.grid(which='major')
@@ -53,6 +62,7 @@ class LivePlot():
 		# Get existing line or create it
 		if name not in self.lines:
 			self.lines[name], = axis.plot([],[], label=name)
+			
 
 		# Update data (with the new _and_ the old points)
 		self.lines[name].set_xdata(xdata)
@@ -61,7 +71,7 @@ class LivePlot():
 		axis.relim()
 		axis.autoscale_view()
 		# We need to draw *and* flush
-		self.figure.canvas.draw()
+		self.figure.canvas.draw()		
 		self.figure.canvas.flush_events()
 
 	def waitclose(self):
@@ -69,14 +79,26 @@ class LivePlot():
 		plt.show()
 
 	def __call__(self, data):
+	
+		epochs_unit = not self.show_iters and self.train is not None and len(data['meta']['batch_size']) > 0
+	
 		# TRAIN DATA PLOTTING
 		times = data['train']['time']
 		its = data['train']['iteration']
+		
+		if epochs_unit:
+			bs = data['meta']['batch_size'][0]
+			its = [float(it) * bs / self.train.get_count() for it in its]
+		
 		num_its = len( its )
 		if num_its > 0:
 			# AVG LOSS
 			num_dat = len( data['train']['avg_loss'] )
-			self.update_data('train', 'avg_loss', self.axup, its[:num_dat], data['train']['avg_loss'])
+			legend = 'avg_loss'
+			if 'train' in self.__dict__ and self.train is not None:
+				legend = legend + ' ' + self.train.get_name()
+			
+			self.update_data('train', legend, self.axup, its[:num_dat], data['train']['avg_loss'])
 			
 			# TRAIN OUTPUTS
 			for label, dat in data['train']['out'].iteritems():
@@ -84,6 +106,10 @@ class LivePlot():
 				if label == 'loss': continue
 				num_dat = len( dat )
 				ax = self.axup if label == 'loss' else self.axup2
+				
+				if 'train' in self.__dict__ and self.train is not None:
+					label = label + ' ' + self.train.get_name()
+				
 				self.update_data('train', label, ax, its[:num_dat], dat)
 				
 			# LEARNING RATE
@@ -94,18 +120,38 @@ class LivePlot():
 		# TEST DATA PLOTTING
 		times = data['test']['time']
 		its = data['test']['iteration']
+		
+		if epochs_unit:
+			bs = data['meta']['batch_size'][0]
+			its = [float(it) * bs / self.train.get_count() for it in its]
+
 		num_its = len( its )
 		if num_its > 0:
 			for test_num, outs in data['test']['out'].iteritems():
 				for label, dat in outs.iteritems():
 					num_dat = len( dat )
 					ax = self.axup if label == 'loss' else self.axup2
-					self.update_data('test', label+"#"+str(test_num), ax, its[:num_dat], dat)
+					
+					legend = label+"#"+str(test_num)
+					if 'val' in self.__dict__ and self.val is not None:
+						legend = label + ' ' + self.val[test_num].get_name()
+					
+					self.update_data('test', legend, ax, its[:num_dat], dat)
+					
+		# SNAPSHOT INDICATIONS
+		its = data['meta']['snapshots']
+		if epochs_unit:
+			bs = data['meta']['batch_size'][0]
+			its = [float(it) * bs / self.train.get_count() for it in its]
+		
+		for it in its:
+			self.axup.axvline(it, color='k')
 		
 		h1, l1 = self.axup.get_legend_handles_labels()
 		h2, l2 = self.axup2.get_legend_handles_labels()
-		self.axup2.legend(h1+h2, l1+l2, loc='center right', fancybox=True, shadow=True)
-		self.axdown.legend(loc='upper right', fancybox=True, shadow=True)
+		self.axup2.legend(h1+h2, l1+l2, loc='center right', fancybox=True, shadow=True, fontsize='small')
+		self.axdown.legend(loc='upper right', fancybox=True, shadow=True, fontsize='small')
+
 	
 if __name__ == "__main__":
 	import os

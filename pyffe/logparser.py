@@ -4,6 +4,10 @@ import re
 
 class LogParser (object):
 
+	batch_size = re.compile('.*output data size: (\d+),.*')
+	
+	snapshots = re.compile('.*_iter_(\d+).caffemodel.*')
+
 	test_it = re.compile('I(\d{2})(\d{2}) (\d+):(\d+):(\d+)\.(\d{3}).*Iteration (\d+), Testing net \(#(\d+)\)')
 	test_out = re.compile('.*Test net output #(\d+): (\w+) = ([^\s]*)( \(.*)?')
 	
@@ -14,6 +18,7 @@ class LogParser (object):
 	def __init__(self, line_iterator):
 		self.line_iter = line_iterator
 		self.data = dict(
+			meta = dict(batch_size=[], snapshots=[]),
 			train = dict(time=[], iteration=[], lr=[], avg_loss=[], out=dict()),
 			test  = dict(time=[], iteration=[], out=dict())
 		)
@@ -30,6 +35,18 @@ class LogParser (object):
 	def parse(self, callback=None):
 		test_num = 0
 		for line in self.line_iter:
+			# BATCH SIZE
+			matches = self.batch_size.match(line)
+			if matches is not None:
+				bs = int( matches.group(1) )
+				self.data['meta']['batch_size'].append(bs)
+			
+			# SNAPSHOT
+			matches = self.snapshots.match(line)
+			if matches is not None:
+				ss_iter = int( matches.group(1) )
+				self.data['meta']['snapshots'].append(ss_iter)
+			
 			# NEW TEST ITERATION
 			matches = self.test_it.match(line)
 			if matches is not None:
