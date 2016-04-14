@@ -6,7 +6,7 @@ class LogParser (object):
 
 	batch_size = re.compile('.*output data size: (\d+),.*')
 	
-	snapshots = re.compile('.*_iter_(\d+).caffemodel.*')
+	snapshots = re.compile('.*Snapshotting.*_iter_(\d+).caffemodel.*')
 
 	test_it = re.compile('I(\d{2})(\d{2}) (\d+):(\d+):(\d+)\.(\d{3}).*Iteration (\d+), Testing net \(#(\d+)\)')
 	test_out = re.compile('.*Test net output #(\d+): (\w+) = ([^\s]*)( \(.*)?')

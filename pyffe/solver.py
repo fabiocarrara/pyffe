@@ -84,7 +84,7 @@ class Solver (object):
 
 		# pretty much never change these.
 		# self.sp.max_iter = 100000
-		# self.sp.test_initialization = false
+		self.sp.test_initialization = False # validation disabled by default
 		# self.sp.average_loss = 25 # this has to do with the display.
 		# self.sp.iter_size = 1 # this is for accumulating gradients
 		self.sp.random_seed = 23
@@ -97,13 +97,25 @@ class Solver (object):
 		self.sp.snapshot = int( math.ceil( float(self.params['snapshot_interval_epochs']) * num / batch_size ) )
 		self.sp.test_interval = int( math.ceil( float(self.params['val_interval_epochs']) * num / batch_size ) )
 		
-		if self.sp.lr_policy == "step":
+		if self.sp.lr_policy == 'step':
 			self.sp.stepsize = int( math.ceil( float(self.params['stepsize_epochs']) * num / batch_size ) )
 		
 	def add_val(self, proto_path, num, batch_size):
+		self.sp.test_initialization = True
 		self.sp.test_net.append( proto_path )
 		self.sp.test_iter.append( int( math.ceil( float(self.params['val_epochs']) * num / batch_size ) ) )
 
+	def disable_val(self):
+		del	self.sp.test_net[:]
+		del	self.sp.test_iter[:]
+		self.sp.test_initialization = False
+	
+	def stop_and_snapshot_at(self, last_iter, snapshot_iter):
+		self.disable_val()
+		self.sp.snapshot = snapshot_iter
+		self.sp.max_iter = last_iter
+		self.sp.test_initialization = False
+	
 	def to_solver_prototxt(self):
 		return str(self.sp)
 

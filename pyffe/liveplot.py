@@ -44,10 +44,11 @@ class LivePlot():
 		
 		self.axup2 = self.axup.twinx()
 		self.axup2.set_autoscalex_on(True)
-		self.axup2.set_autoscaley_on(False)
-		self.axup2.set_ylim(ymin=0, ymax=1)
-		self.axup2.set_yticks(np.arange(0,11) / 10.0)
-		self.axup2.set_yticks(np.arange(0,21) / 20.0, minor=True)
+		self.axup2.set_autoscaley_on(True)
+		# self.axup2.set_autoscaley_on(False)
+		# self.axup2.set_ylim(ymin=0, ymax=1)
+		#self.axup2.set_yticks(np.arange(0,11) / 10.0)
+		#self.axup2.set_yticks(np.arange(0,21) / 20.0, minor=True)
 		self.axup2.set_prop_cycle(
 			cycler('color', ['darkorange','m','k','y']*2) +
 			cycler('marker', ['.']*4 + ['<']*4)
