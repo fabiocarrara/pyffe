@@ -30,6 +30,8 @@ class LivePlot():
 		
 		# Will contain lines
 		self.lines = dict()
+		# Will contain x position of vertical lines, to avoid multiple plotting
+		self.it_vlines = []
 
 		# Autoscale on unknown axis and known lims on the other
 		self.axup.set_autoscalex_on(True)
@@ -103,6 +105,7 @@ class LivePlot():
 			
 			# TRAIN OUTPUTS
 			for label, dat in data['train']['out'].iteritems():
+
 				# FIXME ugly suppression of train loss
 				if label == 'loss': continue
 				num_dat = len( dat )
@@ -146,7 +149,9 @@ class LivePlot():
 			its = [float(it) * bs / self.train.get_count() for it in its]
 		
 		for it in its:
-			self.axup.axvline(it, color='k')
+		    if it not in self.it_vlines:
+		        self.it_vlines.append(it)
+    			self.axup.axvline(it, color='k')
 		
 		h1, l1 = self.axup.get_legend_handles_labels()
 		h2, l2 = self.axup2.get_legend_handles_labels()
