@@ -221,7 +221,7 @@ class Experiment(object):
 
         extract_file = 'extract-' + dataset.get_name() + '.prototxt'
         with open(extract_file, 'w') as f:
-            f.write(net)
+            f.write(str(net))
 
         if os.path.exists(lmdb_name):
             shutil.rmtree(lmdb_name)
@@ -271,19 +271,19 @@ class Experiment(object):
 
         # SETUP TRAIN
         with open(self.workdir + '/train.prototxt', 'w') as f:
-            f.write(self.model.to_train_prototxt(self.train))
+            f.write(str(self.model.to_train_prototxt(self.train)))
         self.solver.set_train('train.prototxt', self.train.get_count(), self.model.get_train_batch_size())
 
         # VAL
         for v in self.val:
             val_file = 'val-' + v.get_name() + '.prototxt'
             with open(self.workdir + '/' + val_file, 'w') as f:
-                f.write(self.model.to_val_prototxt(v))
+                f.write(str(self.model.to_val_prototxt(v)))
 
             self.solver.add_val(val_file, v.get_count(), self.model.get_val_batch_size())
 
         with open(self.workdir + '/deploy.prototxt', 'w') as f:
-            f.write(self.model.to_deploy_prototxt())
+            f.write(str(self.model.to_deploy_prototxt()))
 
         with open(self.workdir + '/solver.prototxt', 'w') as f:
             f.write(self.solver.to_solver_prototxt())
@@ -381,7 +381,7 @@ class Experiment(object):
 
             with open(self.workdir + '/' + test_file, 'w') as f:
                 net, iters = self.model.to_test_prototxt(t)
-                f.write(net)
+                f.write(str(net))
 
             # TODO python data layer with async blob preparation
             caffe_cmd = 'caffe test -gpu 0 -model {} -weights snapshots/snapshot_iter_{}.caffemodel -iterations {} 2> test-{}.caffelog'

@@ -71,7 +71,7 @@ class Model(object):
             c = (l + u) / 2
             self.batch_size = c
             with open("tmp.prototxt", "w") as f:
-                f.write(self.to_deploy_prototxt(optimize=False))
+                f.write(self.to_deploy_prototxt(optimize=False)[0])
 
             ret = os.system("caffe-try-batch-size tmp.prototxt")
 
@@ -150,7 +150,7 @@ class Model(object):
         image_data_param = dict(
             source=subset.get_list_absolute_path(),
             batch_size=self.batch_sizes[1],
-            root_folder=subset.root_folder,
+            # root_folder=subset.root_folder,
             rand_skip=self.batch_sizes[1],
             shuffle=True,
             # new_width,
@@ -164,6 +164,9 @@ class Model(object):
             # mean_file,
             # scale,
         )
+
+        if subset.root_folder is not None:
+            image_data_param['root_folder'] = subset.root_folder
 
         if self.crop_on_test:
             image_data_param['new_width'] = self.infmt.new_width
@@ -295,7 +298,7 @@ class Model(object):
         net.MergeFrom(tmp_net)
         tmp_net = self.deploy_tail(last_top)
         net.MergeFrom(tmp_net)
-        return str(net)
+        return net
 
     def to_train_prototxt(self, subset):
         net = self.train_head(subset)
@@ -303,7 +306,7 @@ class Model(object):
         net.MergeFrom(tmp_net)
         tmp_net = self.train_tail(last_top)
         net.MergeFrom(tmp_net)
-        return str(net)
+        return net
 
     def to_val_prototxt(self, subset):
         net = self.val_head(subset)
@@ -311,7 +314,7 @@ class Model(object):
         net.MergeFrom(tmp_net)
         tmp_net = self.val_tail(last_top)
         net.MergeFrom(tmp_net)
-        return str(net)
+        return net
 
     def to_test_prototxt(self, subset):
 
@@ -330,7 +333,7 @@ class Model(object):
         tmp_net = self.test_tail(last_top)
         net.MergeFrom(tmp_net)
 
-        return str(net), iters
+        return net, iters
 
     def to_extract_prototxt(self, subset):
 
@@ -350,4 +353,4 @@ class Model(object):
         tmp_net = self.deploy_tail(last_top)
         net.MergeFrom(tmp_net)
 
-        return str(net), 'score', iters
+        return net, 'score', iters
