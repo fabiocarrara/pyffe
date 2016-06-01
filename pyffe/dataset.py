@@ -1,5 +1,7 @@
 import os
-
+from collections import Counter
+import numpy as np
+import pandas as pd
 import pyffe
 
 
@@ -67,7 +69,22 @@ class Dataset(object):
         self.subsets = {
             os.path.splitext(list_file)[0]: pyffe.ListFile(self.path + '/' + list_file, self)
             for list_file in os.listdir(self.path) if list_file.endswith(".txt")
-            }
+        }
+
+    # TOFIX: this code is a hack for binary classification only
+    def get_details(self):
+        keys = []
+        frees = []
+        busys = []
+        for k, v in self.subsets.iteritems():
+            try:
+                c = Counter(v.get_labels())
+                frees.append(c[0])
+                busys.append(c[1])
+                keys.append(k)
+            except:
+                print "Skipping", k, ": not a list file"
+        return pd.DataFrame(np.array([frees, busys]).T, index=keys, columns=["free", "busy"])
 
     def __getattr__(self, name):
         if hasattr(self.__dict__, name):
