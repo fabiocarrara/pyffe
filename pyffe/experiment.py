@@ -159,11 +159,34 @@ class Experiment(object):
         acc = np.sum(labels == pred) / float(count)
         return acc
 
+	# TODO: refactor in get_all_val_argmax or something similar..
     def get_argmax_iters(self):
         log_data = self.get_log_data()
         it_idx = [argmax(outs['accuracy']) for k, outs in log_data['test']['out'].iteritems()]
         it_max = [log_data['test']['iteration'][i] for i in it_idx]
         return it_idx, it_max
+    
+    '''
+    PROBABLY USELESS..
+    def get_argmax_iter(self, dataset):
+        log_data = self.get_log_data()
+        it_idx = [(k, argmax(outs['accuracy'])) for k, outs in log_data['test']['out'].iteritems()]
+        max_it_idx = max(it_idx, key=lambda x: log_data['test']['out'][x[0]][x[1]])[1]
+        it_max = log_data['test']['iteration'][max_it_idx]
+        return max_it_idx, it_max
+    '''
+    
+    def get_max_min_val_iter(self):
+        log_data = self.get_log_data()
+        accuracies = np.array([outs['accuracy'] for k, outs in log_data['test']['out'].iteritems()])
+        index = np.argmax(np.min(accuracies, axis=0))
+        return index, log_data['test']['iteration'][index]
+    
+    def get_max_avg_val_iter(self):
+        log_data = self.get_log_data()
+        accuracies = np.array([outs['accuracy'] for k, outs in log_data['test']['out'].iteritems()])
+        index = np.argmax(np.mean(accuracies, axis=0))
+        return index, log_data['test']['iteration'][index]
 
     def get_last_snapshot(self):
         p = re.compile('\d+')
@@ -233,6 +256,12 @@ class Experiment(object):
                         feats[i, :] = feat
                         i += 1
         return feats
+        
+    @preserve_cwd
+    def forward(self, dataset, snapshot_iter=None, blobname=None):
+        lmdb_name = self.extract_features(dataset, snapshot_iter, blobname)
+        return self.get_features(lmdb_name)
+    	
 
     def setup(self, experiments_dir):
         logging.info('Setting up ' + self.long_name() + ' ...')
@@ -413,10 +442,33 @@ class Experiment(object):
     #
     #     return pd.DataFrame(pdata, index=index, columns=vnames)
 
+	@preserve_cwd
+	def trained_models_to_zip(self):
+		os.chdir(self.workdir)
+		
+		_, it_max = self.get_argmax_iters()
+		
+		mname = self.model.name
+		tname = self.train.get_name()
+		
+		for i, it in enumerate(it_max):
+			vname = self.val[i].get_name()
+			aname = "{}-on-{}-val-{}.zip".format(mname, tname, vname)
+			os.system("zip -j {} deploy.prototxt".format(aname, it))
+			os.system("zip -j {} {}/snapshot_iter_{}.caffemodel".format(aname, self.SNAPSHOTS_DIR, it))			
+
+    '''
+    TODO DOC.
+    mode='maxone' -> interesting snapshots are the max of some validation set
+    mode='maxmin' -> interesting snapshot is the one giving the max of the min accuracy on val sets
+    mode='maxavg' -> interesing snapshot is the one giving the max average of accuracy on val sets
+    '''
     @preserve_cwd
-    def summarize(self, datasets=None, exact=True, show_train_points=True):
+    def summarize(self, datasets=None, exact=True, show_train_points=True, mode='maxone'):
+        assert mode in ['maxone', 'maxmin', 'maxavg'], "mode is not one of ('maxone', 'maxmin', 'maxavg'): %r" % mode
+        
         if datasets is None:
-            datasets = self.val
+            datasets = self.test
 
         logging.debug('Summarizing {} ...'.format(self.name))
         # TODO: caching the DataFrame on CSV on disk.
@@ -428,15 +480,27 @@ class Experiment(object):
         last_iter = log_data['train']['iteration'][-1]
         bs = log_data['meta']['batch_size'][0]
 
-        # list of indices where max accuracies for each test are
-        it_idx, it_max = self.get_argmax_iters()
+        # list of indices where wanted accuracies for each test are        
+        if mode is 'maxone':
+            it_idx, it_max = self.get_argmax_iters()
+            vnames = [v.get_name() for v in self.val]
+        elif mode is 'maxmin':
+            i, j = self.get_max_min_val_iter()
+            it_idx = [i]
+            it_max = [j]
+            vnames = [ 'maxmin of' + [v.get_name() for v in self.val].join(',') ]
+        elif mode is 'maxavg':
+            i, j = self.get_max_avg_val_iter()
+            it_idx = [i]
+            it_max = [j]
+            vnames = [ 'maxavg of' + [v.get_name() for v in self.val].join(',') ]
+            
         if exact:
-            pdata = [[round(self.get_accuracy_at(it, v), 2) for it in it_max] for v in datasets]
+            pdata = [[round(self.get_accuracy_at(it, v), 4) for it in it_max] for v in datasets]
         else:
-            pdata = [[round(outs['accuracy'][i], 2) for i in it_idx] for k, outs in log_data['test']['out'].iteritems()]
+            pdata = [[round(outs['accuracy'][i], 4) for i in it_idx] for k, outs in log_data['test']['out'].iteritems()]
 
         dnames = [v.get_name() for v in datasets]
-        vnames = [v.get_name() for v in self.val]
 
         d_idx_num = len(datasets)
         d_idx_names = dnames
