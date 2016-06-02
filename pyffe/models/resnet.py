@@ -21,8 +21,8 @@ def conv_bn(bottom, nout, ks=3, stride=1, pad=0, learn=True):
                              bias_filler=dict(type='constant'))
 
     bn = L.BatchNorm(conv)
-    lrn = L.LRN(bn)
-    return conv, bn, lrn
+    # lrn = L.LRN(bn)
+    return conv, bn
 
 
 def residual_standard_unit(n, nout, s, newdepth=False):
@@ -32,16 +32,16 @@ def residual_standard_unit(n, nout, s, newdepth=False):
     bottom = n.__dict__['tops'].keys()[-1]  # find the last layer in netspec
     stride = 2 if newdepth else 1
 
-    n[s + 'conv1'], n[s + 'bn1'], n[s + 'lrn1'] = conv_bn(n[bottom], ks=3, stride=stride, nout=nout, pad=1)
-    n[s + 'relu1'] = L.ReLU(n[s + 'lrn1'], in_place=True)
-    n[s + 'conv2'], n[s + 'bn2'], n[s + 'lrn2'] = conv_bn(n[s + 'relu1'], ks=3, stride=1, nout=nout, pad=1)
+    n[s + 'conv1'], n[s + 'bn1'] = conv_bn(n[bottom], ks=3, stride=stride, nout=nout, pad=1)
+    n[s + 'relu1'] = L.ReLU(n[s + 'bn1'], in_place=True)
+    n[s + 'conv2'], n[s + 'bn2'] = conv_bn(n[s + 'relu1'], ks=3, stride=1, nout=nout, pad=1)
 
     if newdepth:
-        n[s + 'conv_expand'], n[s + 'bn_expand'], n[s + 'lrn_expand'] = conv_bn(n[bottom], ks=1, stride=2, nout=nout,
+        n[s + 'conv_expand'], n[s + 'bn_expand'] = conv_bn(n[bottom], ks=1, stride=2, nout=nout,
                                                                                 pad=0)
-        n[s + 'sum'] = L.Eltwise(n[s + 'lrn2'], n[s + 'lrn_expand'])
+        n[s + 'sum'] = L.Eltwise(n[s + 'bn2'], n[s + 'bn_expand'])
     else:
-        n[s + 'sum'] = L.Eltwise(n[s + 'lrn2'], n[bottom])
+        n[s + 'sum'] = L.Eltwise(n[s + 'bn2'], n[bottom])
 
     n[s + 'relu2'] = L.ReLU(n[s + 'sum'], in_place=True)
 
@@ -54,18 +54,18 @@ def residual_bottleneck_unit(n, nout, s, newdepth=False):
     bottom = n.__dict__['tops'].keys()[-1]  # find the last layer in netspec
     stride = 2 if newdepth and nout > 64 else 1
 
-    n[s + 'conv1'], n[s + 'bn1'], n[s + 'lrn1'] = conv_bn(n[bottom], ks=1, stride=stride, nout=nout, pad=0)
-    n[s + 'relu1'] = L.ReLU(n[s + 'lrn1'], in_place=True)
-    n[s + 'conv2'], n[s + 'bn2'], n[s + 'lrn2'] = conv_bn(n[s + 'relu1'], ks=3, stride=1, nout=nout, pad=1)
-    n[s + 'relu2'] = L.ReLU(n[s + 'lrn2'], in_place=True)
-    n[s + 'conv3'], n[s + 'bn3'], n[s + 'lrn3'] = conv_bn(n[s + 'relu2'], ks=1, stride=1, nout=nout * 4, pad=0)
+    n[s + 'conv1'], n[s + 'bn1'] = conv_bn(n[bottom], ks=1, stride=stride, nout=nout, pad=0)
+    n[s + 'relu1'] = L.ReLU(n[s + 'bn1'], in_place=True)
+    n[s + 'conv2'], n[s + 'bn2'] = conv_bn(n[s + 'relu1'], ks=3, stride=1, nout=nout, pad=1)
+    n[s + 'relu2'] = L.ReLU(n[s + 'bn2'], in_place=True)
+    n[s + 'conv3'], n[s + 'bn3'] = conv_bn(n[s + 'relu2'], ks=1, stride=1, nout=nout * 4, pad=0)
 
     if newdepth:
-        n[s + 'conv_expand'], n[s + 'bn_expand'], n[s + 'lrn_expand'] = conv_bn(n[bottom], ks=1, stride=stride,
+        n[s + 'conv_expand'], n[s + 'bn_expand'] = conv_bn(n[bottom], ks=1, stride=stride,
                                                                                 nout=nout * 4, pad=0)
-        n[s + 'sum'] = L.Eltwise(n[s + 'lrn3'], n[s + 'lrn_expand'])
+        n[s + 'sum'] = L.Eltwise(n[s + 'bn3'], n[s + 'bn_expand'])
     else:
-        n[s + 'sum'] = L.Eltwise(n[s + 'lrn3'], n[bottom])
+        n[s + 'sum'] = L.Eltwise(n[s + 'bn3'], n[bottom])
 
     n[s + 'relu3'] = L.ReLU(n[s + 'sum'], in_place=True)
 
@@ -123,8 +123,8 @@ class ResNet(Model):
         # n.name = 'ResNet-' + str(self.layers)
 
         # setup the first couple of layers
-        n.conv1, n.bn1, n.lrn1 = conv_bn('data', ks=11, stride=4, nout=nouts[0], pad=0)
-        n.pool1 = L.Pooling(n.lrn1, stride=2, kernel_size=3)
+        n.conv1, n.bn1 = conv_bn('data', ks=11, stride=4, nout=nouts[0], pad=0)
+        n.pool1 = L.Pooling(n.bn1, stride=2, kernel_size=3)
         n.relu1 = L.ReLU(n.pool1, in_place=True)
 
         # make the convolutional body
@@ -139,8 +139,11 @@ class ResNet(Model):
         # add the end layers
         n.global_pool = L.Pooling(n.__dict__['tops'][n.__dict__['tops'].keys()[-1]],
                                   pooling_param=dict(pool=1, global_pooling=True))
+                                  
+        n.score = L.InnerProduct(n.global_pool, num_output=self.params['num_output'])
+        	#, param=[dict(lr_mult=1, decay_mult=1), dict(lr_mult=2, decay_mult=0)])
 
-        return n.to_proto(), 'global_pool'
+        return n.to_proto(), 'score'
 
 
 # test it!
@@ -152,4 +155,4 @@ if __name__ == '__main__':
         scale=1. / 256,
         mirror=True
     )
-    print ResNet(input_format, num_output=2, layers=152).to_train_prototxt()
+    print ResNet(input_format, num_output=2, layers=152).to_deploy_prototxt()
