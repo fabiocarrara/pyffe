@@ -99,7 +99,7 @@ class ResNet(Model):
     def val_tail(self, last_top):
         n = caffe.NetSpec()
         n.loss = L.SoftmaxWithLoss(bottom=[last_top, "label"])
-        n.accuracy = L.Accuracy(bottom=[last_top, "label"], top_k=5)  # , include=dict(phase=caffe.TEST))
+        n.accuracy = L.Accuracy(bottom=[last_top, "label"])  # , include=dict(phase=caffe.TEST))
         return n.to_proto()
 
     def body(self):
