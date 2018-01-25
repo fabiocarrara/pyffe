@@ -18,7 +18,6 @@ import pyffe
 
 logging.basicConfig(format='%(levelname)s %(asctime)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
 
-
 #####################
 # utility functions
 #####################
@@ -85,9 +84,9 @@ def summarize(experiments):
         r = e.summarize()
         report = report.append(r)
     report = report.fillna('-')
-    #with pd.option_context('expand_frame_repr', False):
+    # with pd.option_context('expand_frame_repr', False):
     #    print report
-        # report.to_csv('summary_exact_last.csv')
+    # report.to_csv('summary_exact_last.csv')
     return report
 
 
@@ -101,7 +100,7 @@ class Experiment(object):
     EXP_FILE = 'exp.pyffe'
 
     # FIXME change default lists to immutable tuples ()
-    def __init__(self, pyffe_model, pyffe_solver, train, test=[], val=[]):
+    def __init__(self, pyffe_model, pyffe_solver, train, test=(), val=(), tag=None):
         """
         Initialize an Experiment.
         @param pyffe_model: an object of a subclass of @see pyffe.Model describing your model
@@ -109,21 +108,26 @@ class Experiment(object):
         @param train: a @see pyffe.ListFile object specifying the training samples. Usually you can get it from a @see pyffe.Dataset object
         @param test: a list of @see pyffe.ListFile objects specifying the one or more testing sets.
         @param val: a list of @see pyffe.ListFile objects specifying the one or more validation sets.
+        @param tag: an optional tag to prepend to the experiment generated name
         """
         self.model = copy.deepcopy(pyffe_model)
         self.solver = copy.deepcopy(pyffe_solver)
         self.workdir = None
 
         self.train = train
-        self.test = test if type(test) is list else [test]
-        self.val = val if type(val) is list else [val]
+        self.test = test if isinstance(test, (list, tuple)) else (test,)
+        self.val = val if isinstance(val, (list, tuple)) else (val,)
 
-        self.name = self.short_name()
+        self.tag = tag
+        self.name = None
 
     def short_name(self):
         """
         @return: a short description of the experiment
         """
+        if self.name is not None:
+            return self.name
+
         name = self.model.name + '-tr_' + self.train.get_name()
         if self.val is not None:
             name = name + '-vl_' + '_'.join([v.get_name() for v in self.val])
@@ -137,6 +141,11 @@ class Experiment(object):
             if self.test is not None:
                 name = name + '-ts_' + self.test[0].get_name() + '_etcEtc_' + self.test[-1].get_name()
 
+        # add a prefix tag
+        if self.tag is not None:
+            name = self.tag + '-' + name
+
+        self.name = name
         return name
 
     def long_name(self):
@@ -148,6 +157,11 @@ class Experiment(object):
             name = name + ', validated on ' + ', '.join([v.get_name() for v in self.val])
         if self.test is not None:
             name = name + ', tested on ' + '_'.join([t.get_name() for t in self.test])
+
+        # add a prefix tag
+        if self.tag is not None:
+            return self.tag + '-' + name
+
         return name
 
     def get_accuracy_at(self, it, v):
@@ -159,13 +173,13 @@ class Experiment(object):
         acc = np.sum(labels == pred) / float(count)
         return acc
 
-	# TODO: refactor in get_all_val_argmax or something similar..
+    # TODO: refactor in get_all_val_argmax or something similar..
     def get_argmax_iters(self):
         log_data = self.get_log_data()
         it_idx = [argmax(outs['accuracy']) for k, outs in log_data['test']['out'].iteritems()]
         it_max = [log_data['test']['iteration'][i] for i in it_idx]
         return it_idx, it_max
-    
+
     '''
     PROBABLY USELESS..
     def get_argmax_iter(self, dataset):
@@ -175,13 +189,13 @@ class Experiment(object):
         it_max = log_data['test']['iteration'][max_it_idx]
         return max_it_idx, it_max
     '''
-    
+
     def get_max_min_val_iter(self):
         log_data = self.get_log_data()
         accuracies = np.array([outs['accuracy'] for k, outs in log_data['test']['out'].iteritems()])
         index = np.argmax(np.min(accuracies, axis=0))
         return index, log_data['test']['iteration'][index]
-    
+
     def get_max_avg_val_iter(self):
         log_data = self.get_log_data()
         accuracies = np.array([outs['accuracy'] for k, outs in log_data['test']['out'].iteritems()])
@@ -256,16 +270,18 @@ class Experiment(object):
                         feats[i, :] = feat
                         i += 1
         return feats
-        
+
     @preserve_cwd
     def forward(self, dataset, snapshot_iter=None, blobname=None):
         lmdb_name = self.extract_features(dataset, snapshot_iter, blobname)
         return self.get_features(lmdb_name)
-    	
 
+    '''
+    TO BE DEPRECATED in favour of setup_efficiently(), maintained for backward compatibility
+    '''
     def setup(self, experiments_dir):
         logging.info('Setting up ' + self.long_name() + ' ...')
-        self.workdir = os.path.abspath(experiments_dir.rstrip('/') + '/' + self.name)
+        self.workdir = os.path.abspath(experiments_dir.rstrip('/') + '/' + self.short_name())
 
         mkdir_p(self.workdir + '/' + self.SNAPSHOTS_DIR)
 
@@ -298,6 +314,53 @@ class Experiment(object):
         # DRAW NET
         os.system('/opt/caffe/python/draw_net.py --rankdir TB {0}/train.prototxt {1}/net.png > /dev/null'
                   .format(self.workdir, self.workdir))
+
+        # DUMP EXPERIMENT OBJ
+        self.save()
+
+    def setup_efficiently(self, experiments_dir):
+        logging.info('Setting up ' + self.long_name() + ' ...')
+        self.workdir = os.path.abspath(experiments_dir.rstrip('/') + '/' + self.short_name())
+
+        mkdir_p(self.workdir + '/' + self.SNAPSHOTS_DIR)
+
+        # COMBINED TRAIN AND VAL
+        if len(self.val) != 0:
+            # SETUP TRAIN-VAL with stages
+            t_batch_size = self.model.get_train_batch_size()
+            v_batch_size = self.model.get_val_batch_size()
+
+            with open(self.workdir + '/train_val.prototxt', 'w') as f:
+                f.write(str(self.model.to_train_val_prototxt(self.train, self.val)))
+            self.solver.set_train_val('train_val.prototxt', self.train, t_batch_size, self.val, v_batch_size)
+
+            # DRAW NET
+            os.system('/opt/caffe/python/draw_net.py --rankdir TB {0}/train_val.prototxt {0}/net.png > /dev/null'
+                      .format(self.workdir))
+
+        # TRAIN-ONLY
+        else:
+            # SETUP TRAIN
+            with open(self.workdir + '/train.prototxt', 'w') as f:
+                f.write(str(self.model.to_train_prototxt(self.train)))
+            self.solver.set_train('train.prototxt', self.train.get_count(), self.model.get_train_batch_size())
+
+            # DRAW NET
+            os.system('/opt/caffe/python/draw_net.py --rankdir TB {0}/train_val.prototxt {0}/net.png > /dev/null'
+                      .format(self.workdir))
+
+        with open(self.workdir + '/deploy.prototxt', 'w') as f:
+            f.write(str(self.model.to_deploy_prototxt()))
+
+        with open(self.workdir + '/solver.prototxt', 'w') as f:
+            f.write(self.solver.to_solver_prototxt())
+
+        # WRITE OR LINK MEAN IMAGE / MEAN PIXEL / INITIAL WEIGHTS
+        if self.model.infmt.mean_pixel is not None:
+            np.save(self.workdir + '/mean-pixel.npy', np.array(self.model.infmt.mean_pixel))
+
+        if self.model.pretrain is not None:
+            os.system('ln -s -r ' + self.model.pretrain + ' ' + self.workdir)
 
         # DUMP EXPERIMENT OBJ
         self.save()
@@ -353,6 +416,10 @@ class Experiment(object):
             pyffe.LogParser(line_iter).parse(live_plot)
 
         tee.wait()
+
+        # print something in case of error
+        if caffe.returncode != 0:
+            os.system('tail -n 20 {}'.format(self.LOG_FILE))
 
     # def print_test_results(self):
     #     print
@@ -411,51 +478,51 @@ class Experiment(object):
         )
         plot(self.get_log_data())
 
-    # def summarize(self, show_train_points=True):
-    #
-    #     log_data = self.get_log_data()
-    #     last_iter = log_data['train']['iteration'][-1]
-    #     bs = log_data['meta']['batch_size'][0]
-    #
-    #     # list of indices where max accuracies for each test are
-    #     it_idx, it_max = self.get_argmax_iters()
-    #
-    #     pdata = [[round(outs['accuracy'][i], 2) for i in it_idx] for k, outs in log_data['test']['out'].iteritems()]
-    #     vnames = [v.get_name() for v in self.val]
-    #
-    #     v_idx_num = len(self.val)
-    #     v_idx_names = vnames
-    #
-    #     if show_train_points:
-    #         # XXX maybe bug in iteration/indexes? However, this method is merged with summarize_exact
-    #         train_pcent = ['{0:.0f}% (~{1} imgs)'.format(100 * log_data['test']['iteration'][i] / last_iter,
-    #                                                      log_data['test']['iteration'][i] * bs) for i in it_max]
-    #         pdata = pdata + [train_pcent]
-    #         v_idx_num = len(self.val) + 1
-    #         v_idx_names = vnames + ['   --> at']
-    #
-    #     index = [
-    #         [self.model.name] * v_idx_num,
-    #         [self.train.get_name()] * v_idx_num,
-    #         v_idx_names
-    #     ]
-    #
-    #     return pd.DataFrame(pdata, index=index, columns=vnames)
+        # def summarize(self, show_train_points=True):
+        #
+        #     log_data = self.get_log_data()
+        #     last_iter = log_data['train']['iteration'][-1]
+        #     bs = log_data['meta']['batch_size'][0]
+        #
+        #     # list of indices where max accuracies for each test are
+        #     it_idx, it_max = self.get_argmax_iters()
+        #
+        #     pdata = [[round(outs['accuracy'][i], 2) for i in it_idx] for k, outs in log_data['test']['out'].iteritems()]
+        #     vnames = [v.get_name() for v in self.val]
+        #
+        #     v_idx_num = len(self.val)
+        #     v_idx_names = vnames
+        #
+        #     if show_train_points:
+        #         # XXX maybe bug in iteration/indexes? However, this method is merged with summarize_exact
+        #         train_pcent = ['{0:.0f}% (~{1} imgs)'.format(100 * log_data['test']['iteration'][i] / last_iter,
+        #                                                      log_data['test']['iteration'][i] * bs) for i in it_max]
+        #         pdata = pdata + [train_pcent]
+        #         v_idx_num = len(self.val) + 1
+        #         v_idx_names = vnames + ['   --> at']
+        #
+        #     index = [
+        #         [self.model.name] * v_idx_num,
+        #         [self.train.get_name()] * v_idx_num,
+        #         v_idx_names
+        #     ]
+        #
+        #     return pd.DataFrame(pdata, index=index, columns=vnames)
 
-	@preserve_cwd
-	def trained_models_to_zip(self):
-		os.chdir(self.workdir)
-		
-		_, it_max = self.get_argmax_iters()
-		
-		mname = self.model.name
-		tname = self.train.get_name()
-		
-		for i, it in enumerate(it_max):
-			vname = self.val[i].get_name()
-			aname = "{}-on-{}-val-{}.zip".format(mname, tname, vname)
-			os.system("zip -j {} deploy.prototxt".format(aname, it))
-			os.system("zip -j {} {}/snapshot_iter_{}.caffemodel".format(aname, self.SNAPSHOTS_DIR, it))			
+        @preserve_cwd
+        def trained_models_to_zip(self):
+            os.chdir(self.workdir)
+
+            _, it_max = self.get_argmax_iters()
+
+            mname = self.model.name
+            tname = self.train.get_name()
+
+            for i, it in enumerate(it_max):
+                vname = self.val[i].get_name()
+                aname = "{}-on-{}-val-{}.zip".format(mname, tname, vname)
+                os.system("zip -j {} deploy.prototxt".format(aname, it))
+                os.system("zip -j {} {}/snapshot_iter_{}.caffemodel".format(aname, self.SNAPSHOTS_DIR, it))
 
     '''
     TODO DOC.
@@ -463,14 +530,15 @@ class Experiment(object):
     mode='maxmin' -> interesting snapshot is the one giving the max of the min accuracy on val sets
     mode='maxavg' -> interesing snapshot is the one giving the max average of accuracy on val sets
     '''
+
     @preserve_cwd
     def summarize(self, datasets=None, exact=True, show_train_points=True, mode='maxone'):
         assert mode in ['maxone', 'maxmin', 'maxavg'], "mode is not one of ('maxone', 'maxmin', 'maxavg'): %r" % mode
-        
+
         if datasets is None:
             datasets = self.test
 
-        logging.debug('Summarizing {} ...'.format(self.name))
+        logging.debug('Summarizing {} ...'.format(self.short_name()))
         # TODO: caching the DataFrame on CSV on disk.
         # os.chdir(self.workdir)
         # if os.path.exists('exact_summary.csv'):
@@ -488,13 +556,13 @@ class Experiment(object):
             i, j = self.get_max_min_val_iter()
             it_idx = [i]
             it_max = [j]
-            vnames = [ 'maxmin of' + [v.get_name() for v in self.val].join(',') ]
+            vnames = ['maxmin of' + [v.get_name() for v in self.val].join(',')]
         elif mode is 'maxavg':
             i, j = self.get_max_avg_val_iter()
             it_idx = [i]
             it_max = [j]
-            vnames = [ 'maxavg of' + [v.get_name() for v in self.val].join(',') ]
-            
+            vnames = ['maxavg of' + [v.get_name() for v in self.val].join(',')]
+
         if exact:
             pdata = [[round(self.get_accuracy_at(it, v), 4) for it in it_max] for v in datasets]
         else:

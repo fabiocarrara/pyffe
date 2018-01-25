@@ -134,7 +134,7 @@ class Model(object):
             transform_param['mean_value'] = self.infmt.mean_pixel
 
         n.data, n.label = L.ImageData(ntop=2, image_data_param=image_data_param,
-                                      transform_param=transform_param)  # , include=dict(phase=caffe.TRAIN))
+                                      transform_param=transform_param, include=dict(phase=caffe.TRAIN))
         net = n.to_proto()
 
         net.name = self.name
@@ -145,7 +145,7 @@ class Model(object):
         n.loss = L.SoftmaxWithLoss(bottom=[last_top, "label"])
         return n.to_proto()
 
-    def val_head(self, subset):
+    def val_head(self, subset, stage=None):
 
         image_data_param = dict(
             source=subset.get_list_absolute_path(),
@@ -184,18 +184,28 @@ class Model(object):
         elif self.infmt.mean_pixel is not None:
             transform_param['mean_value'] = self.infmt.mean_pixel
 
+        include_param = dict(phase=caffe.TEST)
+        if stage is not None:
+            include_param['stage'] = stage
+
         n = NetSpec()
         n.data, n.label = L.ImageData(ntop=2, image_data_param=image_data_param,
-                                      transform_param=transform_param)  # , include=dict(phase=caffe.TEST))
+                                      transform_param=transform_param , include=include_param)
 
         net = n.to_proto()
         net.name = self.name
         return net
 
-    def val_tail(self, last_top):
+    def val_tail(self, last_top, stage=None):
         n = NetSpec()
-        n.loss = L.SoftmaxWithLoss(bottom=[last_top, "label"])
-        n.accuracy = L.Accuracy(bottom=[last_top, "label"])  # , include=dict(phase=caffe.TEST))
+        
+        include_param = dict(phase=caffe.TEST)
+        if stage is not None:
+            include_param['stage'] = stage
+            
+        if stage is None:
+            n.loss = L.SoftmaxWithLoss(bottom=[last_top, "label"])
+        n.accuracy = L.Accuracy(bottom=[last_top, "label"] , include=include_param)
         return n.to_proto()
 
     def test_head(self, subset):
@@ -289,6 +299,23 @@ class Model(object):
     # abstract method: must return a NetParameter object and last top name
     def body(self):
         raise NotImplementedError()
+
+    def to_train_val_prototxt(self, train, vals):
+        net = self.train_head(train)
+        for v in vals:
+            tmp_net = self.val_head(v, stage='val-on-' + v.get_name())
+            net.MergeFrom(tmp_net)
+
+        tmp_net, last_top = self.body()
+        net.MergeFrom(tmp_net)
+        tmp_net = self.train_tail(last_top)
+        net.MergeFrom(tmp_net)
+
+        for v in vals:
+            tmp_net = self.val_tail(last_top, stage='val-on-' + v.get_name())
+            net.MergeFrom(tmp_net)
+
+        return net
 
     def to_deploy_prototxt(self, optimize=True):
         if optimize: self.optimize_batch_size()
