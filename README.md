@@ -9,7 +9,7 @@ A small Python library to setup, run, manage and monitor image classification ex
 
 ```python
 import pyffe
-from pyffe.models.alexnet import AlexNet
+from pyffe.models import AlexNet
 
 # Create datasets:
 # 'data/dataset1' is a directory containing list files with image urls.
