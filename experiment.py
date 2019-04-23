@@ -241,11 +241,11 @@ class Experiment(object):
             shutil.rmtree(lmdb_name)
 
         os.system(
-            'caffe-extract-features snapshots/snapshot_iter_{}.caffemodel {} {} {} {} lmdb GPU 0'.format(snapshot_iter,
-                                                                                                         extract_file,
-                                                                                                         blobname,
-                                                                                                         lmdb_name,
-                                                                                                         iters))
+            '/opt/caffe/build/tools/extract_features snapshots/snapshot_iter_{}.caffemodel {} {} {} {} lmdb GPU 0'.format(snapshot_iter,
+                                                                                                                          extract_file,
+                                                                                                                          blobname,
+                                                                                                                          lmdb_name,
+                                                                                                                          iters))
 
         return lmdb_name
 
